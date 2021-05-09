@@ -54,5 +54,22 @@ class WebsocketClient {
   }
 
   // This is a lower abstraction - should be moved somewhere else
-  async beginConnection() {}
+  async beginConnection() {
+    const fetchCompatibleURL = new URL(this.#urlRecord);
+
+    //change protocol to http/https to play nice with fetch
+    const oldProtocol = fetchCompatibleURL.protocol;
+    fetchCompatibleURL.protocol = protocolMap[oldProtocol];
+
+    const requestURL = fetchCompatibleURL.toString();
+    const requestOptions = {
+      referrer: "no-referrer",
+      mode: "websocket",
+      redirect: "error",
+      credentials: "include",
+      "service-workers": "none",
+      cache: "no-store",
+    };
+    const request = new Request(requestURL, requestOptions);
+  }
 }
