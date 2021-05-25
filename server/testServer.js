@@ -4,14 +4,28 @@ const WebSocket = require("ws");
 const wss = new WebSocket.Server({ port: 8080 });
 console.log(wss);
 wss.on("connection", function connection(ws) {
-  console.log("connection");
-  console.log(ws);
-  //wss.send('hello')
+  console.log("connected");
+
+  // used to get mssages - OPCODE must be a textframe or non ping/pong/close fram
   ws.on("message", function incoming(message) {
     console.log("received: %s", message);
   });
 
-  ws.send("something");
+  // see when pings occur
+  ws.on("ping", (data) => {
+    console.log("ping:", data);
+  });
+
+  // handle errors
+  ws.on("error", (e) => console.log("server: ", e));
+
+  // can send stuff
+  // ws.send("something");
+
+  // on close
+  ws.on("close", () => {
+    console.log("closed connection");
+  });
 });
 
 wss.on("error", (e) => console.log("server: ", e));
