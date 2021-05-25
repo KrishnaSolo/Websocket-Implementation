@@ -1,11 +1,24 @@
 "use strict";
 const http = require("http");
 const net = require("net");
-// const URL = require("url");
+const buffer = require("buffer");
+const crypto = require("crypto");
 
 // TODO: move into constants file
 const WS = "ws";
 const WSS = "wss";
+const ABORT_ERR = new Error(
+  "Websocket Connection Failed - request was aborted"
+);
+const PROTOCOL_FAILED = new Error(
+  "Websocket Connection was aborted due to server response failing validation."
+);
+const CLIENT_HEADERS = {
+  Connection: "Upgrade",
+  Upgrade: "Websocket",
+  "Sec-Websocket-Version": 13,
+  "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+};
 const schemePortMap = {
   http: 80,
   https: 443,
@@ -31,6 +44,7 @@ class WebsocketClient {
   // TODO: needs a getter which serializes value using algo definied in spec - but we can use .toString() on URL object
   #urlRecord;
   #protocols;
+  #socket;
 
   // TODO: Missing a check to see if protocol(s) is(are) defined as per RFC 2616
   constructor(url, protocols = []) {
@@ -69,54 +83,38 @@ class WebsocketClient {
     const requestURL = fetchCompatibleURL.toString();
     const protocols = this.#protocols.join(", ");
 
+    const randomBytes = crypto.randomBytes(16);
+    const buf = Buffer.alloc(16, randomBytes);
+
     const headers = {
-      Connection: "Upgrade",
-      Upgrade: "Websocket",
-      "Sec-Websocket-Version": 13,
-      "Sec-Websocket-Key": "x3JJHMbDL1EzLkh9GBhXDw==", // hard coded for now
-      "Sec-WebSocket-Protocol": "chat",
-      "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
+      "Sec-Websocket-Key": buf.toString("base64"),
+      "Sec-WebSocket-Protocol": protocols,
+      ...CLIENT_HEADERS,
     };
-    // const requestOptions = {
-    //   referrer: "no-referrer",
-    //   mode: "websocket",
-    //   redirect: "error",
-    //   credentials: "include",
-    //   "service-workers": "none",
-    //   cache: "no-store",
-    //   headers: headers,
-    // };
-    //console.log(headers);
-    //const request = new Request(requestURL, requestOptions);
-    const req = http.get(
-      {
-        port: 8080,
-        createConnection: (options) => {
-          options.path = options.socketPath;
-          return net.connect(options);
-        },
-        timeout: 200,
-        headers: headers,
-      },
-      (res) => {
-        // Do stuff with response
-        console.log(res);
-        const body = "hello world";
-        res
-          .writeHead(200, {
-            "Content-Length": Buffer.byteLength(body),
-            "Content-Type": "text/plain",
-          })
-          .end(body);
-      }
-    );
-    //console.log("res", req);
-    req.on("response", (res) => {
-      console.log("done", res);
+
+    console.log(headers);
+    const req = http.get(requestURL, {
+      // createConnection: (options) => {
+      //   options.path = options.socketPath;
+      //   return net.connect(options);
+      // },
+      timeout: 200,
+      headers: headers,
     });
+
     req.on("upgrade", (res, socket, head) => {
-      console.log("hello");
+      const { statusCode, statusMessage, aborted, headers } = res;
+      console.log(
+        "Upgrade complete. response: ",
+        statusMessage,
+        " statuscode: ",
+        statusCode
+      );
+      if (aborted) req.destroy(ABORT_ERR);
+
+      this.#socket = socket;
     });
+
     req.on("error", (res) => {
       console.log("error:", res);
     });
