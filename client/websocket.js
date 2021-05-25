@@ -37,6 +37,33 @@ function hasDuplicates(arr) {
   }
   return false;
 }
+function maskData(payloadBuffer) {
+  const randomBytes = crypto.randomBytes(4);
+  const len = Buffer.byteLength(payloadBuffer);
+  const maskedPayloadBuffer = Buffer.alloc(len);
+  // console.log("Key: ", randomBytes, " len: ", len, " inputL: ", payloadBuffer);
+  for (let i = 0; i < len; i++) {
+    let index = i % 4;
+    // console.log(
+    //   "Before masking - i: ",
+    //   i,
+    //   " index: ",
+    //   index,
+    //   " input at i: ",
+    //   payloadBuffer[i],
+    //   " key at index: ",
+    //   randomBytes[index]
+    // );
+    maskedPayloadBuffer[i] = payloadBuffer[i] ^ randomBytes[index];
+    // console.log(
+    //   "Masked data = ",
+    //   maskedPayloadBuffer[i],
+    //   " all data: ",
+    //   maskedPayloadBuffer
+    // );
+  }
+  return [maskedPayloadBuffer, randomBytes];
+}
 
 /* Based of WHATWG living standard */
 class WebsocketClient {
@@ -111,6 +138,7 @@ class WebsocketClient {
         statusCode
       );
       if (aborted) req.destroy(ABORT_ERR);
+      if (statusCode === 101) return this.closeConnection(socket);
 
       this.#socket = socket;
     });
@@ -119,6 +147,34 @@ class WebsocketClient {
       console.log("error:", res);
     });
   }
+
+  closeConnection(socket) {
+    const OPCODE = Buffer.from([0x03, 0xea]);
+    const data = Buffer.from([0x88, 0x82]);
+    console.log("opcode and then data: ", OPCODE, " , ", data);
+
+    const [maskedData, key] = maskData(OPCODE);
+    const totalLength = data.length + maskedData.length + key.length;
+    console.log("Total Length", totalLength);
+    const closeframe = Buffer.concat([data, key, maskedData], totalLength);
+
+    console.log("closeing frame: ", closeframe);
+    const res = socket.write(closeframe);
+    console.log("status: ", res);
+
+    socket.setTimeout(3000);
+    socket.on("end", () => {
+      console.log("end connection now!");
+      socket.destroy(PROTOCOL_FAILED);
+    });
+    socket.on("timeout", () => {
+      if (!socket.destroyed) {
+        console.log("failing socket");
+        socket.destroy(PROTOCOL_FAILED);
+      }
+    });
+  }
+  validateHeaders() {}
 }
 
 const ws = new WebsocketClient("ws://127.0.0.1:8080/", ["chat"]);
