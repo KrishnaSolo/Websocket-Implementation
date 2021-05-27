@@ -23,7 +23,7 @@ wss.on("connection", function connection(ws) {
   // ws.send("something");
 
   // on close
-  ws.on("close", () => {
+  ws.on("close", (code) => {
     console.log("closed connection");
   });
 });
