@@ -121,6 +121,7 @@ class WebsocketClient {
 
     console.log(headers);
     const req = http.get(requestURL, {
+      // Not sure if below is necessary - remove/investigate later
       // createConnection: (options) => {
       //   options.path = options.socketPath;
       //   return net.connect(options);
@@ -135,10 +136,16 @@ class WebsocketClient {
         "Upgrade complete. response: ",
         statusMessage,
         " statuscode: ",
-        statusCode
+        statusCode,
+        " headers: ",
+        headers
       );
       if (aborted) req.destroy(ABORT_ERR);
-      if (statusCode === 101) return this.closeConnection(socket);
+      if (statusCode !== 101) return this.closeConnection(socket);
+      if (this.invalidHeaders(headers, buf.toString("base64"))) {
+        console.log("hrer");
+        return this.closeConnection(socket);
+      }
 
       this.#socket = socket;
     });
@@ -159,10 +166,12 @@ class WebsocketClient {
     const closeframe = Buffer.concat([data, key, maskedData], totalLength);
 
     console.log("closeing frame: ", closeframe);
-    const res = socket.write(closeframe);
-    console.log("status: ", res);
 
     socket.setTimeout(3000);
+
+    socket.on("data", (res) => {
+      console.log("Return ", res);
+    });
     socket.on("end", () => {
       console.log("end connection now!");
       socket.destroy(PROTOCOL_FAILED);
@@ -173,8 +182,27 @@ class WebsocketClient {
         socket.destroy(PROTOCOL_FAILED);
       }
     });
+
+    const res = socket.write(closeframe);
+    console.log("status: ", res);
   }
-  validateHeaders() {}
+
+  invalidHeaders(headers, key) {
+    // Note: localecompare return 0 if strings match
+    if (headers.upgrade.localeCompare("websocket")) return true;
+    if (headers.connection.localeCompare("Upgrade")) return true;
+    if (!this.#protocols.includes(headers["sec-websocket-protocol"]))
+      return true;
+
+    // Validation check to see if key can be used to create same value as value in header
+    const hash = crypto.createHash("sha1");
+    const serverKey = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    const encryptedServerKey = hash.update(serverKey);
+    const targetAcceptValue = encryptedServerKey.digest("base64");
+
+    if (targetAcceptValue !== headers["sec-websocket-accept"]) return true;
+    return false;
+  }
 }
 
 const ws = new WebsocketClient("ws://127.0.0.1:8080/", ["chat"]);
