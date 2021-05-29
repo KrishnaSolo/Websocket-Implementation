@@ -1,0 +1,24 @@
+{
+  "name": "websocket-implementation",
+  "version": "1.0.0",
+  "description": "Simple scoped websocket imp - client and server side",
+  "main": "y",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "testClient": "node ./demo/testClient.js",
+    "testServer": "node ./demo/testServer.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KrishnaSolo/Websocket-Implementation.git"
+  },
+  "author": "KrishnaSolo",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/KrishnaSolo/Websocket-Implementation/issues"
+  },
+  "homepage": "https://github.com/KrishnaSolo/Websocket-Implementation#readme",
+  "dependencies": {
+    "ws": "^7.4.5"
+  }
+}
