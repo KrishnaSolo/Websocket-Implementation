@@ -1,78 +1,22 @@
 "use strict";
 const http = require("http");
-const net = require("net");
-const buffer = require("buffer");
 const crypto = require("crypto");
 const EventEmitter = require("events");
-
-// TODO: move into constants file
-const WS = "ws";
-const WSS = "wss";
-const ABORT_ERR = new Error(
-  "Websocket Connection Failed - request was aborted"
-);
-const PROTOCOL_FAILED = new Error(
-  "Websocket Connection was aborted due to server response failing validation."
-);
-const MESSAGE_CONSTRAINT_ERR = new Error(
-  "Websocket could not send data due to byte size of data being over 127 Bytes."
-);
-const CLIENT_HEADERS = {
-  Connection: "Upgrade",
-  Upgrade: "Websocket",
-  "Sec-Websocket-Version": 13,
-  "Sec-WebSocket-Extensions": "permessage-deflate; client_max_window_bits",
-};
-const schemePortMap = {
-  http: 80,
-  https: 443,
-};
-const protocolMap = {
-  "ws:": "http:",
-  "wss:": "https:",
-};
-
-// TODO: move into utils file
-function hasDuplicates(arr) {
-  const set = new Set();
-  for (let val in arr) {
-    if (set.has(val)) return true;
-    set.add(val);
-  }
-  return false;
-}
-function maskData(payloadBuffer) {
-  const randomBytes = crypto.randomBytes(4);
-  const len = Buffer.byteLength(payloadBuffer);
-  const maskedPayloadBuffer = Buffer.alloc(len);
-  // console.log("Key: ", randomBytes, " len: ", len, " inputL: ", payloadBuffer);
-  for (let i = 0; i < len; i++) {
-    let index = i % 4;
-    // console.log(
-    //   "Before masking - i: ",
-    //   i,
-    //   " index: ",
-    //   index,
-    //   " input at i: ",
-    //   payloadBuffer[i],
-    //   " key at index: ",
-    //   randomBytes[index]
-    // );
-    maskedPayloadBuffer[i] = payloadBuffer[i] ^ randomBytes[index];
-    // console.log(
-    //   "Masked data = ",
-    //   maskedPayloadBuffer[i],
-    //   " all data: ",
-    //   maskedPayloadBuffer
-    // );
-  }
-  return [maskedPayloadBuffer, randomBytes];
-}
+const {
+  ABORT_ERR,
+  CLIENT_HEADERS,
+  MESSAGE_CONSTRAINT_ERR,
+  PROTOCOL_FAILED,
+  PROTOCOL_MAP,
+  WS,
+  WSS,
+} = require("./websocket.constants");
+const { hasDuplicates, maskData } = require("./websocket.utils");
 
 /* Based of WHATWG living standard */
 class WebsocketClient extends EventEmitter {
   /* private variables */
-  // TODO: needs a getter which serializes value using algo definied in spec - but we can use .toString() on URL object
+  // TODO: needs a getter which serializes value using algo defined in spec - but we can use .toString() on URL object
   #urlRecord;
   #protocols;
   #socket;
@@ -121,7 +65,7 @@ class WebsocketClient extends EventEmitter {
 
     //change protocol to http/https to play nice with fetch
     const oldProtocol = fetchCompatibleURL.protocol;
-    fetchCompatibleURL.protocol = protocolMap[oldProtocol];
+    fetchCompatibleURL.protocol = PROTOCOL_MAP[oldProtocol];
 
     const requestURL = fetchCompatibleURL.toString();
     const protocols = this.#protocols.join(", ");
@@ -166,7 +110,7 @@ class WebsocketClient extends EventEmitter {
         return this.closeConnection(socket);
       }
 
-      this.#socket = socket;
+      this.#socket = this.setupSocket(socket);
       this.readyState = this.#OPEN;
       this.protocol = headers["sec-websocket-protocol"][0] || "";
       this.emit("open");
@@ -177,6 +121,23 @@ class WebsocketClient extends EventEmitter {
       req.destroy(ABORT_ERR);
       this.readyState = this.#CLOSED;
     });
+  }
+
+  setupSocket(socket) {
+    socket.on("error", (res) => {
+      const codeBuffer = res.slice(0, 2);
+      const errBuffer = res.slice(2);
+      const error = errBuffer.toString();
+      this.emit("error", error);
+    });
+    socket.on("data", (data) => {
+      // Need to validate this but for the scope of this project we can leave it
+      const codeBuffer = data.slice(0, 2);
+      const msgBuffer = data.slice(2);
+      const message = msgBuffer.toString();
+      this.emit("message", message);
+    });
+    return socket;
   }
 
   sendData(dataText) {
@@ -203,12 +164,13 @@ class WebsocketClient extends EventEmitter {
     this.emit("text", "Message Status: " + res);
     console.log("status: ", res);
   }
+
   send(code, data, socket = this.#socket) {}
 
   closeConnection(socket = this.#socket) {
     this.readyState = this.#CLOSING;
 
-    // Code used to close the frame
+    // Code used to let server know why connection was closed
     const OPCODE = Buffer.from([0x03, 0xea]);
     const data = Buffer.from([0x88, 0x82]);
     console.log("opcode and then data: ", OPCODE, " , ", data);
@@ -223,12 +185,12 @@ class WebsocketClient extends EventEmitter {
     socket.setTimeout(3000);
 
     socket.on("data", (res) => {
-      console.log("Return ", res);
-    });
-    socket.on("end", () => {
-      console.log("end connection now!");
-      socket.destroy(PROTOCOL_FAILED);
-      this.readyState = this.#CLOSED;
+      console.log("Server Return Flavor: ", res);
+      socket.on("end", () => {
+        console.log("end connection now!");
+        socket.destroy(PROTOCOL_FAILED);
+        this.readyState = this.#CLOSED;
+      });
     });
     socket.on("timeout", () => {
       if (!socket.destroyed) {
@@ -263,11 +225,4 @@ class WebsocketClient extends EventEmitter {
   }
 }
 
-const ws = new WebsocketClient("ws://127.0.0.1:8080/", ["chat"]);
-ws.on("open", () => {
-  console.log("woooo!");
-  ws.sendData("nice work");
-});
-ws.on("text", (res) => {
-  console.log(res);
-});
+module.exports = WebsocketClient;
