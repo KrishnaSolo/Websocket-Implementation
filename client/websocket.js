@@ -3,6 +3,7 @@ const http = require("http");
 const net = require("net");
 const buffer = require("buffer");
 const crypto = require("crypto");
+const EventEmitter = require("events");
 
 // TODO: move into constants file
 const WS = "ws";
@@ -12,6 +13,9 @@ const ABORT_ERR = new Error(
 );
 const PROTOCOL_FAILED = new Error(
   "Websocket Connection was aborted due to server response failing validation."
+);
+const MESSAGE_CONSTRAINT_ERR = new Error(
+  "Websocket could not send data due to byte size of data being over 127 Bytes."
 );
 const CLIENT_HEADERS = {
   Connection: "Upgrade",
@@ -66,15 +70,26 @@ function maskData(payloadBuffer) {
 }
 
 /* Based of WHATWG living standard */
-class WebsocketClient {
+class WebsocketClient extends EventEmitter {
   /* private variables */
   // TODO: needs a getter which serializes value using algo definied in spec - but we can use .toString() on URL object
   #urlRecord;
   #protocols;
   #socket;
+  #CONNECTING = 0;
+  #OPEN = 1;
+  #CLOSING = 2;
+  #CLOSED = 3;
+
+  /* public variables */
+  protocol;
+  readyState;
+  bufferedAmount;
 
   // TODO: Missing a check to see if protocol(s) is(are) defined as per RFC 2616
   constructor(url, protocols = []) {
+    super();
+
     const urlRecord = new URL(url); // specs say to use a url parser algo, but this is out of scope
     const hasWS = urlRecord.protocol.includes(WS);
     const hasWSS = urlRecord.protocol.includes(WSS);
@@ -96,6 +111,7 @@ class WebsocketClient {
       );
     this.#urlRecord = urlRecord;
     this.#protocols = protocols;
+    this.readyState = this.#CONNECTING;
     this.beginConnection();
   }
 
@@ -140,7 +156,10 @@ class WebsocketClient {
         " headers: ",
         headers
       );
-      if (aborted) req.destroy(ABORT_ERR);
+      if (aborted) {
+        this.readyState = this.#CLOSED;
+        req.destroy(ABORT_ERR);
+      }
       if (statusCode !== 101) return this.closeConnection(socket);
       if (this.invalidHeaders(headers, buf.toString("base64"))) {
         console.log("hrer");
@@ -148,14 +167,48 @@ class WebsocketClient {
       }
 
       this.#socket = socket;
+      this.readyState = this.#OPEN;
+      this.protocol = headers["sec-websocket-protocol"][0] || "";
+      this.emit("open");
     });
 
     req.on("error", (res) => {
       console.log("error:", res);
+      req.destroy(ABORT_ERR);
+      this.readyState = this.#CLOSED;
     });
   }
 
-  closeConnection(socket) {
+  sendData(dataText) {
+    const message = Buffer.from(dataText);
+    const len = message.length;
+    console.log("Data is ", len, " bytes long");
+
+    if (len > 127) throw MESSAGE_CONSTRAINT_ERR;
+    const frameHeader = Buffer.from([0x81]);
+    // 128 is the offset so we can get the binary 1xxx xxxx - where the 7 x's represent the bits used by the frame
+    // to convey length of message. Since JS has limited binary control, an offset is used.
+    const messageLength = 128 + len;
+    const frameMessageDetails = Buffer.from([messageLength]);
+    const dataLen = frameHeader.length + frameMessageDetails.length;
+    const data = Buffer.concat([frameHeader, frameMessageDetails], dataLen);
+
+    const [maskedData, key] = maskData(message);
+    const totalLength = data.length + maskedData.length + key.length;
+    console.log("Total Length", totalLength);
+    const textFrame = Buffer.concat([data, key, maskedData], totalLength);
+
+    console.log("text frame: ", textFrame);
+    const res = this.#socket.write(textFrame);
+    this.emit("text", "Message Status: " + res);
+    console.log("status: ", res);
+  }
+  send(code, data, socket = this.#socket) {}
+
+  closeConnection(socket = this.#socket) {
+    this.readyState = this.#CLOSING;
+
+    // Code used to close the frame
     const OPCODE = Buffer.from([0x03, 0xea]);
     const data = Buffer.from([0x88, 0x82]);
     console.log("opcode and then data: ", OPCODE, " , ", data);
@@ -175,15 +228,20 @@ class WebsocketClient {
     socket.on("end", () => {
       console.log("end connection now!");
       socket.destroy(PROTOCOL_FAILED);
+      this.readyState = this.#CLOSED;
     });
     socket.on("timeout", () => {
       if (!socket.destroyed) {
         console.log("failing socket");
         socket.destroy(PROTOCOL_FAILED);
+        this.readyState = this.#CLOSED;
       }
     });
 
     const res = socket.write(closeframe);
+    // send(code, data, socket); - code will be 1002, data will be text i want to send
+    this.readyState = this.#CLOSED;
+    this.emit("close");
     console.log("status: ", res);
   }
 
@@ -206,3 +264,10 @@ class WebsocketClient {
 }
 
 const ws = new WebsocketClient("ws://127.0.0.1:8080/", ["chat"]);
+ws.on("open", () => {
+  console.log("woooo!");
+  ws.sendData("nice work");
+});
+ws.on("text", (res) => {
+  console.log(res);
+});
