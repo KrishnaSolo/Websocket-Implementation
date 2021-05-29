@@ -9,6 +9,8 @@ wss.on("connection", function connection(ws) {
   // used to get mssages - OPCODE must be a textframe or non ping/pong/close fram
   ws.on("message", function incoming(message) {
     console.log("received: %s", message);
+    // can send stuff
+    ws.send("something");
   });
 
   // see when pings occur
@@ -18,9 +20,6 @@ wss.on("connection", function connection(ws) {
 
   // handle errors
   ws.on("error", (e) => console.log("server: ", e));
-
-  // can send stuff
-  // ws.send("something");
 
   // on close
   ws.on("close", (code) => {
