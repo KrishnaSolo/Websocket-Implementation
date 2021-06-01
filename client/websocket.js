@@ -16,7 +16,6 @@ const { hasDuplicates, maskData } = require("./websocket.utils");
 /* Based of WHATWG living standard */
 class WebsocketClient extends EventEmitter {
   /* private variables */
-  // TODO: needs a getter which serializes value using algo defined in spec - but we can use .toString() on URL object
   #urlRecord;
   #protocols;
   #socket;
@@ -29,6 +28,7 @@ class WebsocketClient extends EventEmitter {
   protocol;
   readyState;
   bufferedAmount;
+  url;
 
   // TODO: Missing a check to see if protocol(s) is(are) defined as per RFC 2616
   constructor(url, protocols = []) {
@@ -56,6 +56,7 @@ class WebsocketClient extends EventEmitter {
     this.#urlRecord = urlRecord;
     this.#protocols = protocols;
     this.readyState = this.#CONNECTING;
+    this.url = urlRecord.toString();
     this.beginConnection();
   }
 
@@ -81,11 +82,6 @@ class WebsocketClient extends EventEmitter {
 
     console.log(headers);
     const req = http.get(requestURL, {
-      // Not sure if below is necessary - remove/investigate later
-      // createConnection: (options) => {
-      //   options.path = options.socketPath;
-      //   return net.connect(options);
-      // },
       timeout: 200,
       headers: headers,
     });
@@ -140,7 +136,7 @@ class WebsocketClient extends EventEmitter {
     return socket;
   }
 
-  sendData(dataText) {
+  send(dataText) {
     const message = Buffer.from(dataText);
     const len = message.length;
     console.log("Data is ", len, " bytes long");
@@ -165,22 +161,43 @@ class WebsocketClient extends EventEmitter {
     console.log("status: ", res);
   }
 
-  send(code, data, socket = this.#socket) {}
+  sendFrame(code, data, socket = this.#socket) {}
+  convertToBinary(code, size) {
+    const binStr = code.toString(2);
+    const len = binStr.length;
+    const missingBits = size - len;
+    const frameCompatibleCode = code * 2 ** missingBits;
+    const codeStr = frameCompatibleCode.toString(2);
+    const byte1 = new Number(codeStr.slice(0, 8));
+    const byte2 = new Number(codeStr.slice(8, 16));
+    const finalBuffer = Buffer.from([byte1, byte2]);
+    return finalBuffer;
+  }
 
-  closeConnection(socket = this.#socket) {
-    this.readyState = this.#CLOSING;
+  close(code, closeReason) {
+    // Below has been copied - move later on
+    const message = Buffer.from(closeReason);
+    const len = message.length;
+    console.log("Data is ", len, " bytes long");
+
+    if (len > 127) throw MESSAGE_CONSTRAINT_ERR;
+    // TODO - add code validation
 
     // Code used to let server know why connection was closed
-    const OPCODE = Buffer.from([0x03, 0xea]);
+    const OPCODE = this.convertToBinary(code, 16); //Buffer.from([0x03, 0xea]);
     const data = Buffer.from([0x88, 0x82]);
     console.log("opcode and then data: ", OPCODE, " , ", data);
 
     const [maskedData, key] = maskData(OPCODE);
     const totalLength = data.length + maskedData.length + key.length;
     console.log("Total Length", totalLength);
-    const closeframe = Buffer.concat([data, key, maskedData], totalLength);
+    const closeFrame = Buffer.concat([data, key, maskedData], totalLength);
+    this.closeConnection(closeFrame);
+  }
 
-    console.log("closeing frame: ", closeframe);
+  closeConnection(closeFrame, socket = this.#socket) {
+    this.readyState = this.#CLOSING;
+    console.log("closeing frame: ", closeFrame);
 
     socket.setTimeout(3000);
 
@@ -200,8 +217,7 @@ class WebsocketClient extends EventEmitter {
       }
     });
 
-    const res = socket.write(closeframe);
-    // send(code, data, socket); - code will be 1002, data will be text i want to send
+    const res = socket.write(closeFrame);
     this.readyState = this.#CLOSED;
     this.emit("close");
     console.log("status: ", res);
