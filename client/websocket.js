@@ -8,6 +8,7 @@ const {
   MESSAGE_CONSTRAINT_ERR,
   PROTOCOL_FAILED,
   PROTOCOL_MAP,
+  STATE_MAP,
   WS,
   WSS,
 } = require("./websocket.constants");
@@ -19,16 +20,37 @@ class WebsocketClient extends EventEmitter {
   #urlRecord;
   #protocols;
   #socket;
-  #CONNECTING = 0;
-  #OPEN = 1;
-  #CLOSING = 2;
-  #CLOSED = 3;
+  #protocol;
+  #readyState;
+  #bufferedAmount;
 
-  /* public variables */
-  protocol;
-  readyState;
-  bufferedAmount;
-  url;
+  /* public variables - All Read only */
+  get protocol() {
+    return this.#protocol;
+  }
+  get readyState() {
+    return this.#readyState;
+  }
+  get bufferedAmount() {
+    return this.#bufferedAmount;
+  }
+  get URL() {
+    return this.#urlRecord;
+  }
+
+  /* Constants */
+  get CONNECTING() {
+    return STATE_MAP.CONNECTING;
+  }
+  get OPEN() {
+    return STATE_MAP.OPEN;
+  }
+  get CLOSING() {
+    return STATE_MAP.CLOSING;
+  }
+  get CLOSED() {
+    return STATE_MAP.CLOSED;
+  }
 
   // TODO: Missing a check to see if protocol(s) is(are) defined as per RFC 2616
   constructor(url, protocols = []) {
@@ -55,8 +77,7 @@ class WebsocketClient extends EventEmitter {
       );
     this.#urlRecord = urlRecord;
     this.#protocols = protocols;
-    this.readyState = this.#CONNECTING;
-    this.url = urlRecord.toString();
+    this.#readyState = STATE_MAP.CONNECTING;
     this.beginConnection();
   }
 
@@ -97,7 +118,7 @@ class WebsocketClient extends EventEmitter {
         headers
       );
       if (aborted) {
-        this.readyState = this.#CLOSED;
+        this.readyState = STATE_MAP.CLOSED;
         req.destroy(ABORT_ERR);
       }
       if (statusCode !== 101) return this.closeConnection(socket);
@@ -107,15 +128,15 @@ class WebsocketClient extends EventEmitter {
       }
 
       this.#socket = this.setupSocket(socket);
-      this.readyState = this.#OPEN;
-      this.protocol = headers["sec-websocket-protocol"][0] || "";
+      this.#readyState = STATE_MAP.OPEN;
+      this.#protocol = headers["sec-websocket-protocol"][0] || "";
       this.emit("open");
     });
 
     req.on("error", (res) => {
       console.log("error:", res);
       req.destroy(ABORT_ERR);
-      this.readyState = this.#CLOSED;
+      this.#readyState = STATE_MAP.CLOSED;
     });
   }
 
@@ -196,7 +217,7 @@ class WebsocketClient extends EventEmitter {
   }
 
   closeConnection(closeFrame, socket = this.#socket) {
-    this.readyState = this.#CLOSING;
+    this.readyState = STATE_MAP.CLOSING;
     console.log("closeing frame: ", closeFrame);
 
     socket.setTimeout(3000);
@@ -206,19 +227,19 @@ class WebsocketClient extends EventEmitter {
       socket.on("end", () => {
         console.log("end connection now!");
         socket.destroy(PROTOCOL_FAILED);
-        this.readyState = this.#CLOSED;
+        this.readyState = STATE_MAP.CLOSED;
       });
     });
     socket.on("timeout", () => {
       if (!socket.destroyed) {
         console.log("failing socket");
         socket.destroy(PROTOCOL_FAILED);
-        this.readyState = this.#CLOSED;
+        this.readyState = STATE_MAP.CLOSED;
       }
     });
 
     const res = socket.write(closeFrame);
-    this.readyState = this.#CLOSED;
+    this.readyState = STATE_MAP.CLOSED;
     this.emit("close");
     console.log("status: ", res);
   }
