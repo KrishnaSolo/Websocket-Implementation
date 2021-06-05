@@ -23,6 +23,12 @@ class WebsocketClient extends EventEmitter {
   #protocol;
   #readyState;
   #bufferedAmount;
+  #LISTENER_MAP = {
+    onmessage: () => {},
+    onerror: () => {},
+    onopen: () => {},
+    onclose: () => {},
+  };
 
   /* public variables - All Read only */
   get protocol() {
@@ -78,6 +84,16 @@ class WebsocketClient extends EventEmitter {
     this.#urlRecord = urlRecord;
     this.#protocols = protocols;
     this.#readyState = STATE_MAP.CONNECTING;
+    ["onmessage", "onopen", "onclose", "onerror"].map((val) => {
+      Object.defineProperty(this, val, {
+        get() {
+          return this.#LISTENER_MAP[val];
+        },
+        set(fn) {
+          this.#LISTENER_MAP[val] = fn;
+        },
+      });
+    });
     this.beginConnection();
   }
 
@@ -118,18 +134,18 @@ class WebsocketClient extends EventEmitter {
         headers
       );
       if (aborted) {
-        this.readyState = STATE_MAP.CLOSED;
+        this.#readyState = STATE_MAP.CLOSED;
         req.destroy(ABORT_ERR);
       }
       if (statusCode !== 101) return this.closeConnection(socket);
       if (this.invalidHeaders(headers, buf.toString("base64"))) {
-        console.log("hrer");
         return this.closeConnection(socket);
       }
 
       this.#socket = this.setupSocket(socket);
       this.#readyState = STATE_MAP.OPEN;
       this.#protocol = headers["sec-websocket-protocol"][0] || "";
+      this.onopen();
       this.emit("open");
     });
 
@@ -142,10 +158,16 @@ class WebsocketClient extends EventEmitter {
 
   setupSocket(socket) {
     socket.on("error", (res) => {
+      if (res instanceof Error) {
+        this.emit("error", res.message);
+        this.onerror(res.message);
+        return;
+      }
       const codeBuffer = res.slice(0, 2);
       const errBuffer = res.slice(2);
       const error = errBuffer.toString();
       this.emit("error", error);
+      this.onerror(error);
     });
     socket.on("data", (data) => {
       // Need to validate this but for the scope of this project we can leave it
@@ -153,6 +175,7 @@ class WebsocketClient extends EventEmitter {
       const msgBuffer = data.slice(2);
       const message = msgBuffer.toString();
       this.emit("message", message);
+      this.onmessage(message);
     });
     return socket;
   }
@@ -213,34 +236,34 @@ class WebsocketClient extends EventEmitter {
     const totalLength = data.length + maskedData.length + key.length;
     console.log("Total Length", totalLength);
     const closeFrame = Buffer.concat([data, key, maskedData], totalLength);
-    this.closeConnection(closeFrame);
+    this.closeConnection(code, closeReason, closeFrame);
   }
 
-  closeConnection(closeFrame, socket = this.#socket) {
-    this.readyState = STATE_MAP.CLOSING;
+  closeConnection(code, reason, closeFrame, socket = this.#socket) {
+    this.#readyState = STATE_MAP.CLOSING;
     console.log("closeing frame: ", closeFrame);
 
     socket.setTimeout(3000);
-
     socket.on("data", (res) => {
-      console.log("Server Return Flavor: ", res);
-      socket.on("end", () => {
+      console.log("Server Return Response: ", res);
+      socket.on("end", (res) => {
         console.log("end connection now!");
         socket.destroy(PROTOCOL_FAILED);
-        this.readyState = STATE_MAP.CLOSED;
+        this.#readyState = STATE_MAP.CLOSED;
       });
     });
     socket.on("timeout", () => {
       if (!socket.destroyed) {
         console.log("failing socket");
         socket.destroy(PROTOCOL_FAILED);
-        this.readyState = STATE_MAP.CLOSED;
+        this.#readyState = STATE_MAP.CLOSED;
       }
     });
 
     const res = socket.write(closeFrame);
-    this.readyState = STATE_MAP.CLOSED;
-    this.emit("close");
+    this.#readyState = STATE_MAP.CLOSED;
+    this.emit("close", code, reason);
+    this.onclose(code, reason);
     console.log("status: ", res);
   }
 
