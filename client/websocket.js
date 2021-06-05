@@ -144,7 +144,7 @@ class WebsocketClient extends EventEmitter {
 
       this.#socket = this.setupSocket(socket);
       this.#readyState = STATE_MAP.OPEN;
-      this.#protocol = headers["sec-websocket-protocol"][0] || "";
+      this.#protocol = headers["sec-websocket-protocol"] || "";
       this.onopen();
       this.emit("open");
     });
