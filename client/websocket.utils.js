@@ -1,5 +1,13 @@
 "use strict";
+const http = require("http");
 const crypto = require("crypto");
+const {
+  ABORT_ERR,
+  CLIENT_HEADERS,
+  PROTOCOL_FAILED,
+  PROTOCOL_MAP,
+  STATE_MAP,
+} = require("./websocket.constants");
 // Websocket client utils
 
 // This might be needed in server - but leave here for now
@@ -15,14 +23,14 @@ function hasDuplicates(arr) {
 // This is a lower abstraction - should be moved somewhere else
 async function beginConnection() {
   console.log("test: ", this);
-  const fetchCompatibleURL = new URL(this.#urlRecord);
+  const fetchCompatibleURL = new URL(this._urlRecord);
 
   //change protocol to http/https to play nice with fetch
   const oldProtocol = fetchCompatibleURL.protocol;
   fetchCompatibleURL.protocol = PROTOCOL_MAP[oldProtocol];
 
   const requestURL = fetchCompatibleURL.toString();
-  const protocols = this.#protocols.join(", ");
+  const protocols = this._protocols.join(", ");
 
   const randomBytes = crypto.randomBytes(16);
   const buf = Buffer.alloc(16, randomBytes);
@@ -50,7 +58,7 @@ async function beginConnection() {
       headers
     );
     if (aborted) {
-      this.#readyState = STATE_MAP.CLOSED;
+      this._readyState = STATE_MAP.CLOSED;
       req.destroy(ABORT_ERR);
     }
     if (statusCode !== 101)
@@ -59,9 +67,9 @@ async function beginConnection() {
       return this.close(1002, "Header from server were not valid.");
     }
 
-    this.#socket = setupSocket.call(this, socket);
-    this.#readyState = STATE_MAP.OPEN;
-    this.#protocol = headers["sec-websocket-protocol"] || "";
+    this._socket = setupSocket.call(this, socket);
+    this._readyState = STATE_MAP.OPEN;
+    this._protocol = headers["sec-websocket-protocol"] || "";
     this.onopen();
     this.emit("open");
   });
@@ -69,7 +77,7 @@ async function beginConnection() {
   req.on("error", (res) => {
     console.log("error:", res);
     req.destroy(ABORT_ERR);
-    this.#readyState = STATE_MAP.CLOSED;
+    this._readyState = STATE_MAP.CLOSED;
   });
 }
 
@@ -139,7 +147,7 @@ function convertToBinary(code, size) {
 }
 
 function closeConnection(code, reason, closeFrame, socket) {
-  this.#readyState = STATE_MAP.CLOSING;
+  this._readyState = STATE_MAP.CLOSING;
   console.log("closeing frame: ", closeFrame);
 
   socket.setTimeout(3000);
@@ -148,19 +156,19 @@ function closeConnection(code, reason, closeFrame, socket) {
     socket.on("end", (res) => {
       console.log("end connection now!");
       socket.destroy(PROTOCOL_FAILED);
-      this.#readyState = STATE_MAP.CLOSED;
+      this._readyState = STATE_MAP.CLOSED;
     });
   });
   socket.on("timeout", () => {
     if (!socket.destroyed) {
       console.log("failing socket");
       socket.destroy(PROTOCOL_FAILED);
-      this.#readyState = STATE_MAP.CLOSED;
+      this._readyState = STATE_MAP.CLOSED;
     }
   });
 
   const res = socket.write(closeFrame);
-  this.#readyState = STATE_MAP.CLOSED;
+  this._readyState = STATE_MAP.CLOSED;
   this.emit("close", code, reason);
   this.onclose(code, reason);
   console.log("status: ", res);
@@ -170,7 +178,7 @@ function invalidHeaders(headers, key) {
   // Note: localecompare return 0 if strings match
   if (headers.upgrade.localeCompare("websocket")) return true;
   if (headers.connection.localeCompare("Upgrade")) return true;
-  if (!this.#protocols.includes(headers["sec-websocket-protocol"])) return true;
+  if (!this._protocols.includes(headers["sec-websocket-protocol"])) return true;
 
   // Validation check to see if key can be used to create same value as value in header
   const hash = crypto.createHash("sha1");
