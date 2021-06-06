@@ -22,14 +22,14 @@ const {
 
 /* Based of WHATWG living standard */
 class WebsocketClient extends EventEmitter {
-  /* private variables */
-  #urlRecord;
-  #protocols;
-  #socket;
-  #protocol;
-  #readyState;
-  #bufferedAmount;
-  #LISTENER_MAP = {
+  /* protected variables */
+  _urlRecord;
+  _protocols;
+  _socket;
+  _protocol;
+  _readyState;
+  _bufferedAmount;
+  _LISTENER_MAP = {
     onmessage: () => {},
     onerror: () => {},
     onopen: () => {},
@@ -38,16 +38,16 @@ class WebsocketClient extends EventEmitter {
 
   /* public variables - All Read only */
   get protocol() {
-    return this.#protocol;
+    return this._protocol;
   }
   get readyState() {
-    return this.#readyState;
+    return this._readyState;
   }
   get bufferedAmount() {
-    return this.#bufferedAmount;
+    return this._bufferedAmount;
   }
   get URL() {
-    return this.#urlRecord;
+    return this._urlRecord;
   }
 
   /* Constants */
@@ -87,16 +87,16 @@ class WebsocketClient extends EventEmitter {
       throw new SyntaxError(
         "Protocols provided has one or more duplicate values"
       );
-    this.#urlRecord = urlRecord;
-    this.#protocols = protocols;
-    this.#readyState = STATE_MAP.CONNECTING;
+    this._urlRecord = urlRecord;
+    this._protocols = protocols;
+    this._readyState = STATE_MAP.CONNECTING;
     ["onmessage", "onopen", "onclose", "onerror"].map((val) => {
       Object.defineProperty(this, val, {
         get() {
-          return this.#LISTENER_MAP[val];
+          return this._LISTENER_MAP[val];
         },
         set(fn) {
-          this.#LISTENER_MAP[val] = fn;
+          this._LISTENER_MAP[val] = fn;
         },
       });
     });
@@ -123,7 +123,7 @@ class WebsocketClient extends EventEmitter {
     const textFrame = Buffer.concat([data, key, maskedData], totalLength);
 
     console.log("text frame: ", textFrame);
-    const res = this.#socket.write(textFrame);
+    const res = this._socket.write(textFrame);
     this.emit("text", "Message Status: " + res);
     console.log("status: ", res);
   }
@@ -146,7 +146,7 @@ class WebsocketClient extends EventEmitter {
     const totalLength = data.length + maskedData.length + key.length;
     console.log("Total Length", totalLength);
     const closeFrame = Buffer.concat([data, key, maskedData], totalLength);
-    closeConnection.call(this, code, closeReason, closeFrame, this.#socket);
+    closeConnection.call(this, code, closeReason, closeFrame, this._socket);
   }
 }
 
