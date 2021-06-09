@@ -5,7 +5,7 @@ const ws = new WebSocketClient("ws://127.0.0.1:8080/", ["chat"]);
 ws.on("open", () => {
   console.log("woooo!");
   ws.send("nice work");
-  ws.close(1000, "idk man");
+  ws.close(1002, "idk man");
 });
 
 // ws.on("message", (res) => {

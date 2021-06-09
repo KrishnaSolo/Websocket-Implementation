@@ -22,8 +22,8 @@ wss.on("connection", function connection(ws) {
   ws.on("error", (e) => console.log("server: ", e));
 
   // on close
-  ws.on("close", (code) => {
-    console.log("closed connection");
+  ws.on("close", (code, reason) => {
+    console.log("closed connection: ", code, " , ", reason);
   });
 });
 
