@@ -1,13 +1,7 @@
 "use strict";
-const http = require("http");
-const crypto = require("crypto");
 const EventEmitter = require("events");
 const {
-  ABORT_ERR,
-  CLIENT_HEADERS,
   MESSAGE_CONSTRAINT_ERR,
-  PROTOCOL_FAILED,
-  PROTOCOL_MAP,
   STATE_MAP,
   WS,
   WSS,
@@ -97,6 +91,8 @@ class WebsocketClient extends EventEmitter {
         },
         set(fn) {
           this._LISTENER_MAP[val] = fn;
+          const event = val === "onmessage" ? "data" : val.substring(2);
+          this.addListener(event, fn);
         },
       });
     });
@@ -124,14 +120,14 @@ class WebsocketClient extends EventEmitter {
 
     console.log("text frame: ", textFrame);
     const res = this._socket.write(textFrame);
-    this.emit("text", "Message Status: " + res);
     console.log("status: ", res);
+    return res;
   }
 
   close(code, closeReason) {
     // Below has been copied - move later on
     const message = Buffer.from(closeReason);
-    const len = message.length;
+    const len = message.length + 2; // 2 bytes dedicated to code
     console.log("Data is ", len, " bytes long");
 
     if (len > 127) throw MESSAGE_CONSTRAINT_ERR;
@@ -139,13 +135,26 @@ class WebsocketClient extends EventEmitter {
 
     // Code used to let server know why connection was closed
     const OPCODE = convertToBinary(code, 16); //Buffer.from([0x03, 0xea]);
-    const data = Buffer.from([0x88, 0x82]);
-    console.log("opcode and then data: ", OPCODE, " , ", data);
+    console.log(OPCODE);
+    const datalength = Buffer.from([len + 128]);
+    const headFrame = Buffer.from([0x88]);
+    const configFrame = Buffer.concat(
+      [headFrame, datalength],
+      headFrame.length + datalength.length
+    );
+    console.log("opcode and then data: ", OPCODE, " , ", configFrame);
 
-    const [maskedData, key] = maskData(OPCODE);
-    const totalLength = data.length + maskedData.length + key.length;
+    const payload = Buffer.concat(
+      [OPCODE, message],
+      OPCODE.length + message.length
+    );
+    const [maskedData, key] = maskData(payload);
+    const totalLength = configFrame.length + maskedData.length + key.length;
     console.log("Total Length", totalLength);
-    const closeFrame = Buffer.concat([data, key, maskedData], totalLength);
+    const closeFrame = Buffer.concat(
+      [configFrame, key, maskedData],
+      totalLength
+    );
     closeConnection.call(this, code, closeReason, closeFrame, this._socket);
   }
 }

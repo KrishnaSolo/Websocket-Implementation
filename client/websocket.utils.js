@@ -70,7 +70,6 @@ async function beginConnection() {
     this._socket = setupSocket.call(this, socket);
     this._readyState = STATE_MAP.OPEN;
     this._protocol = headers["sec-websocket-protocol"] || "";
-    this.onopen();
     this.emit("open");
   });
 
@@ -84,15 +83,15 @@ async function beginConnection() {
 function setupSocket(socket) {
   socket.on("error", (res) => {
     if (res instanceof Error) {
+      //this.onerror(res.message);
       this.emit("error", res.message);
-      this.onerror(res.message);
       return;
     }
     const codeBuffer = res.slice(0, 2);
     const errBuffer = res.slice(2);
     const error = errBuffer.toString();
     this.emit("error", error);
-    this.onerror(error);
+    //this.onerror(error);
   });
   socket.on("data", (data) => {
     // Need to validate this but for the scope of this project we can leave it
@@ -100,7 +99,7 @@ function setupSocket(socket) {
     const msgBuffer = data.slice(2);
     const message = msgBuffer.toString();
     this.emit("message", message);
-    this.onmessage(message);
+    //this.onmessage(message);
   });
   return socket;
 }
@@ -133,15 +132,23 @@ function maskData(payloadBuffer) {
   return [maskedPayloadBuffer, randomBytes];
 }
 
-// TODO: make more generic
+// TODO: make more generic - rewrite this to add 0s to front instead
 function convertToBinary(code, size) {
   const binStr = code.toString(2);
   const len = binStr.length;
   const missingBits = size - len;
-  const frameCompatibleCode = code * 2 ** missingBits;
-  const codeStr = frameCompatibleCode.toString(2);
-  const byte1 = new Number(codeStr.slice(0, 8));
-  const byte2 = new Number(codeStr.slice(8, 16));
+  console.log("code: ", code, " missin: ", missingBits);
+  let bufferBits = "";
+  for (let i = 0; i < missingBits; i++) {
+    bufferBits += "0";
+  }
+  const frameCompatibleCode = `${bufferBits + binStr}`;
+  // const frameCompatibleCode = code * 2 ** missingBits;
+  console.log(frameCompatibleCode);
+  const codeStr = frameCompatibleCode;
+  console.log(codeStr);
+  const byte1 = parseInt(codeStr.slice(0, 8), 2);
+  const byte2 = parseInt(codeStr.slice(8, 16), 2);
   const finalBuffer = Buffer.from([byte1, byte2]);
   return finalBuffer;
 }
@@ -170,7 +177,6 @@ function closeConnection(code, reason, closeFrame, socket) {
   const res = socket.write(closeFrame);
   this._readyState = STATE_MAP.CLOSED;
   this.emit("close", code, reason);
-  this.onclose(code, reason);
   console.log("status: ", res);
 }
 
