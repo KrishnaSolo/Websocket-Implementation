@@ -91,7 +91,7 @@ class WebsocketClient extends EventEmitter {
         },
         set(fn) {
           this._LISTENER_MAP[val] = fn;
-          const event = val === "onmessage" ? "data" : val.substring(2);
+          const event = val.substring(2);
           this.addListener(event, fn);
         },
       });
