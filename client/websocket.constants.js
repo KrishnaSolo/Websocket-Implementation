@@ -22,6 +22,12 @@ const PROTOCOL_MAP = {
   "ws:": "http:",
   "wss:": "https:",
 };
+const STATE_MAP = {
+  CONNECTING: 0,
+  OPEN: 1,
+  CLOSING: 2,
+  CLOSED: 3,
+};
 
 module.exports = {
   WS,
@@ -31,4 +37,5 @@ module.exports = {
   MESSAGE_CONSTRAINT_ERR,
   CLIENT_HEADERS,
   PROTOCOL_MAP,
+  STATE_MAP,
 };

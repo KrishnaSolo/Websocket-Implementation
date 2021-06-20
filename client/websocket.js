@@ -1,34 +1,62 @@
 "use strict";
-const http = require("http");
-const crypto = require("crypto");
 const EventEmitter = require("events");
 const {
-  ABORT_ERR,
-  CLIENT_HEADERS,
   MESSAGE_CONSTRAINT_ERR,
-  PROTOCOL_FAILED,
-  PROTOCOL_MAP,
+  STATE_MAP,
   WS,
   WSS,
 } = require("./websocket.constants");
-const { hasDuplicates, maskData } = require("./websocket.utils");
+const {
+  hasDuplicates,
+  maskData,
+  beginConnection,
+  closeConnection,
+  convertToBinary,
+} = require("./websocket.utils");
 
 /* Based of WHATWG living standard */
 class WebsocketClient extends EventEmitter {
-  /* private variables */
-  // TODO: needs a getter which serializes value using algo defined in spec - but we can use .toString() on URL object
-  #urlRecord;
-  #protocols;
-  #socket;
-  #CONNECTING = 0;
-  #OPEN = 1;
-  #CLOSING = 2;
-  #CLOSED = 3;
+  /* protected variables */
+  _urlRecord;
+  _protocols;
+  _socket;
+  _protocol;
+  _readyState;
+  _bufferedAmount;
+  _LISTENER_MAP = {
+    onmessage: () => {},
+    onerror: () => {},
+    onopen: () => {},
+    onclose: () => {},
+  };
 
-  /* public variables */
-  protocol;
-  readyState;
-  bufferedAmount;
+  /* public variables - All Read only */
+  get protocol() {
+    return this._protocol;
+  }
+  get readyState() {
+    return this._readyState;
+  }
+  get bufferedAmount() {
+    return this._bufferedAmount;
+  }
+  get URL() {
+    return this._urlRecord;
+  }
+
+  /* Constants */
+  get CONNECTING() {
+    return STATE_MAP.CONNECTING;
+  }
+  get OPEN() {
+    return STATE_MAP.OPEN;
+  }
+  get CLOSING() {
+    return STATE_MAP.CLOSING;
+  }
+  get CLOSED() {
+    return STATE_MAP.CLOSED;
+  }
 
   // TODO: Missing a check to see if protocol(s) is(are) defined as per RFC 2616
   constructor(url, protocols = []) {
@@ -53,94 +81,25 @@ class WebsocketClient extends EventEmitter {
       throw new SyntaxError(
         "Protocols provided has one or more duplicate values"
       );
-    this.#urlRecord = urlRecord;
-    this.#protocols = protocols;
-    this.readyState = this.#CONNECTING;
-    this.beginConnection();
+    this._urlRecord = urlRecord;
+    this._protocols = protocols;
+    this._readyState = STATE_MAP.CONNECTING;
+    ["onmessage", "onopen", "onclose", "onerror"].map((val) => {
+      Object.defineProperty(this, val, {
+        get() {
+          return this._LISTENER_MAP[val];
+        },
+        set(fn) {
+          this._LISTENER_MAP[val] = fn;
+          const event = val.substring(2);
+          this.addListener(event, fn);
+        },
+      });
+    });
+    beginConnection.call(this);
   }
 
-  // This is a lower abstraction - should be moved somewhere else
-  async beginConnection() {
-    const fetchCompatibleURL = new URL(this.#urlRecord);
-
-    //change protocol to http/https to play nice with fetch
-    const oldProtocol = fetchCompatibleURL.protocol;
-    fetchCompatibleURL.protocol = PROTOCOL_MAP[oldProtocol];
-
-    const requestURL = fetchCompatibleURL.toString();
-    const protocols = this.#protocols.join(", ");
-
-    const randomBytes = crypto.randomBytes(16);
-    const buf = Buffer.alloc(16, randomBytes);
-
-    const headers = {
-      "Sec-Websocket-Key": buf.toString("base64"),
-      "Sec-WebSocket-Protocol": protocols,
-      ...CLIENT_HEADERS,
-    };
-
-    console.log(headers);
-    const req = http.get(requestURL, {
-      // Not sure if below is necessary - remove/investigate later
-      // createConnection: (options) => {
-      //   options.path = options.socketPath;
-      //   return net.connect(options);
-      // },
-      timeout: 200,
-      headers: headers,
-    });
-
-    req.on("upgrade", (res, socket, head) => {
-      const { statusCode, statusMessage, aborted, headers } = res;
-      console.log(
-        "Upgrade complete. response: ",
-        statusMessage,
-        " statuscode: ",
-        statusCode,
-        " headers: ",
-        headers
-      );
-      if (aborted) {
-        this.readyState = this.#CLOSED;
-        req.destroy(ABORT_ERR);
-      }
-      if (statusCode !== 101) return this.closeConnection(socket);
-      if (this.invalidHeaders(headers, buf.toString("base64"))) {
-        console.log("hrer");
-        return this.closeConnection(socket);
-      }
-
-      this.#socket = this.setupSocket(socket);
-      this.readyState = this.#OPEN;
-      this.protocol = headers["sec-websocket-protocol"][0] || "";
-      this.emit("open");
-    });
-
-    req.on("error", (res) => {
-      console.log("error:", res);
-      req.destroy(ABORT_ERR);
-      this.readyState = this.#CLOSED;
-    });
-  }
-
-  setupSocket(socket) {
-    socket.on("error", (res) => {
-      const codeBuffer = res.slice(0, 2);
-      const errBuffer = res.slice(2);
-      const error = errBuffer.toString();
-      this.emit("error", error);
-    });
-    socket.on("data", (data) => {
-      // Need to validate this but for the scope of this project we can leave it
-      const codeBuffer = data.slice(0, 2);
-      const msgBuffer = data.slice(2);
-      const message = msgBuffer.toString();
-      this.emit("message", message);
-    });
-    return socket;
-  }
-
-  sendData(dataText) {
+  send(dataText) {
     const message = Buffer.from(dataText);
     const len = message.length;
     console.log("Data is ", len, " bytes long");
@@ -160,68 +119,43 @@ class WebsocketClient extends EventEmitter {
     const textFrame = Buffer.concat([data, key, maskedData], totalLength);
 
     console.log("text frame: ", textFrame);
-    const res = this.#socket.write(textFrame);
-    this.emit("text", "Message Status: " + res);
+    const res = this._socket.write(textFrame);
     console.log("status: ", res);
+    return res;
   }
 
-  send(code, data, socket = this.#socket) {}
+  close(code, closeReason) {
+    // Below has been copied - move later on
+    const message = Buffer.from(closeReason);
+    const len = message.length + 2; // 2 bytes dedicated to code
+    console.log("Data is ", len, " bytes long");
 
-  closeConnection(socket = this.#socket) {
-    this.readyState = this.#CLOSING;
+    if (len > 127) throw MESSAGE_CONSTRAINT_ERR;
+    // TODO - add code validation
 
     // Code used to let server know why connection was closed
-    const OPCODE = Buffer.from([0x03, 0xea]);
-    const data = Buffer.from([0x88, 0x82]);
-    console.log("opcode and then data: ", OPCODE, " , ", data);
+    const OPCODE = convertToBinary(code, 16); //Buffer.from([0x03, 0xea]);
+    console.log(OPCODE);
+    const datalength = Buffer.from([len + 128]);
+    const headFrame = Buffer.from([0x88]);
+    const configFrame = Buffer.concat(
+      [headFrame, datalength],
+      headFrame.length + datalength.length
+    );
+    console.log("opcode and then data: ", OPCODE, " , ", configFrame);
 
-    const [maskedData, key] = maskData(OPCODE);
-    const totalLength = data.length + maskedData.length + key.length;
+    const payload = Buffer.concat(
+      [OPCODE, message],
+      OPCODE.length + message.length
+    );
+    const [maskedData, key] = maskData(payload);
+    const totalLength = configFrame.length + maskedData.length + key.length;
     console.log("Total Length", totalLength);
-    const closeframe = Buffer.concat([data, key, maskedData], totalLength);
-
-    console.log("closeing frame: ", closeframe);
-
-    socket.setTimeout(3000);
-
-    socket.on("data", (res) => {
-      console.log("Server Return Flavor: ", res);
-      socket.on("end", () => {
-        console.log("end connection now!");
-        socket.destroy(PROTOCOL_FAILED);
-        this.readyState = this.#CLOSED;
-      });
-    });
-    socket.on("timeout", () => {
-      if (!socket.destroyed) {
-        console.log("failing socket");
-        socket.destroy(PROTOCOL_FAILED);
-        this.readyState = this.#CLOSED;
-      }
-    });
-
-    const res = socket.write(closeframe);
-    // send(code, data, socket); - code will be 1002, data will be text i want to send
-    this.readyState = this.#CLOSED;
-    this.emit("close");
-    console.log("status: ", res);
-  }
-
-  invalidHeaders(headers, key) {
-    // Note: localecompare return 0 if strings match
-    if (headers.upgrade.localeCompare("websocket")) return true;
-    if (headers.connection.localeCompare("Upgrade")) return true;
-    if (!this.#protocols.includes(headers["sec-websocket-protocol"]))
-      return true;
-
-    // Validation check to see if key can be used to create same value as value in header
-    const hash = crypto.createHash("sha1");
-    const serverKey = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    const encryptedServerKey = hash.update(serverKey);
-    const targetAcceptValue = encryptedServerKey.digest("base64");
-
-    if (targetAcceptValue !== headers["sec-websocket-accept"]) return true;
-    return false;
+    const closeFrame = Buffer.concat(
+      [configFrame, key, maskedData],
+      totalLength
+    );
+    closeConnection.call(this, code, closeReason, closeFrame, this._socket);
   }
 }
 
