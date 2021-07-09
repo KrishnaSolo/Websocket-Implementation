@@ -15,7 +15,12 @@ wss.on("connection", function connection(ws) {
 
   // see when pings occur
   ws.on("ping", (data) => {
-    console.log("ping:", data);
+    console.log("ping:", data.toString());
+    ws.pong("gotcah");
+  });
+
+  ws.on("pong", (data) => {
+    console.log("pong:", data.toString());
   });
 
   // handle errors

@@ -8,7 +8,9 @@ ws.onopen = () => {
 ws.on("open", () => {
   console.log("woooo!");
   ws.send("nice work");
-  ws.close(1002, "idk man");
+  ws.ping();
+  ws.pong("pong");
+  // ws.close(1002, "idk man");
 });
 
 ws.on("error", (res) => {
