@@ -99,7 +99,7 @@ class WebsocketClient extends EventEmitter {
     beginConnection.call(this);
   }
 
-  ping(pingText) {
+  ping(pingText = "") {
     const message = Buffer.from(pingText);
     const len = message.length;
     const frameHeader = Buffer.from([0x89]);
@@ -119,7 +119,7 @@ class WebsocketClient extends EventEmitter {
     return res;
   }
 
-  pong(pongText) {
+  pong(pongText = "") {
     const message = Buffer.from(pongText);
     const len = message.length;
     const frameHeader = Buffer.from([0x8a]);
@@ -164,7 +164,7 @@ class WebsocketClient extends EventEmitter {
     return res;
   }
 
-  close(code, closeReason) {
+  close(code, closeReason = "") {
     // Below has been copied - move later on
     const message = Buffer.from(closeReason);
     const len = message.length + 2; // 2 bytes dedicated to code

@@ -19,6 +19,10 @@ wss.on("connection", function connection(ws) {
     ws.pong("gotcah");
   });
 
+  ws.on("pong", (data) => {
+    console.log("pong:", data.toString());
+  });
+
   // handle errors
   ws.on("error", (e) => console.log("server: ", e));
 
