@@ -99,6 +99,46 @@ class WebsocketClient extends EventEmitter {
     beginConnection.call(this);
   }
 
+  ping(pingText) {
+    const message = Buffer.from(pingText);
+    const len = message.length;
+    const frameHeader = Buffer.from([0x89]);
+
+    const messageLength = 128 + len;
+    const frameMessageDetails = Buffer.from([messageLength]);
+    const dataLen = frameHeader.length + frameMessageDetails.length;
+    const data = Buffer.concat([frameHeader, frameMessageDetails], dataLen);
+
+    const [maskedData, key] = maskData(message);
+    const totalLength = data.length + maskedData.length + key.length;
+    console.log("Total Length", totalLength);
+    const pingFrame = Buffer.concat([data, key, maskedData], totalLength);
+
+    const res = this._socket.write(pingFrame);
+    console.log("status: ", res);
+    return res;
+  }
+
+  pong(pongText) {
+    const message = Buffer.from(pongText);
+    const len = message.length;
+    const frameHeader = Buffer.from([0x8a]);
+
+    const messageLength = 128 + len;
+    const frameMessageDetails = Buffer.from([messageLength]);
+    const dataLen = frameHeader.length + frameMessageDetails.length;
+    const data = Buffer.concat([frameHeader, frameMessageDetails], dataLen);
+
+    const [maskedData, key] = maskData(message);
+    const totalLength = data.length + maskedData.length + key.length;
+    console.log("Total Length", totalLength);
+    const pongFrame = Buffer.concat([data, key, maskedData], totalLength);
+
+    const res = this._socket.write(pongFrame);
+    console.log("status: ", res);
+    return res;
+  }
+
   send(dataText) {
     const message = Buffer.from(dataText);
     const len = message.length;
